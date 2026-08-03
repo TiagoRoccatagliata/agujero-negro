@@ -1,0 +1,431 @@
+html, body {
+  margin: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+canvas {
+  display: block;
+}
+
+/* Panel de ayuda. Se oculta con H o solo a los 7 segundos, así no aparece
+   en la grabación. */
+.hud {
+  position: fixed;
+  left: 20px;
+  bottom: 20px;
+  padding: 14px 18px;
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(0, 0, 0, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 0.5s ease;
+  z-index: 10;
+}
+
+.hud.hidden {
+  opacity: 0;
+}
+
+.hud-title {
+  color: #ffb277;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.hud-meta {
+  color: rgba(255, 255, 255, 0.42);
+  margin-bottom: 10px;
+}
+
+.hud table {
+  border-collapse: collapse;
+}
+
+.hud td {
+  padding: 1px 0;
+}
+
+.hud td:first-child {
+  padding-right: 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   MODO PRESENTACIÓN
+   Todo lo que normalmente pondrías en el editor de video: títulos, código en
+   pantalla, cortes y fundidos. Los tamaños van en vw para que se vea igual
+   grabando a 1080p o a 1440p.
+   ========================================================================== */
+
+.pres {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  font: 400 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* mientras no arrancó, nada de esto existe visualmente */
+.pres:not(.on) .pres-panel,
+.pres:not(.on) .pres-title,
+.pres:not(.on) .pres-bar { opacity: 0; }
+
+/* ── Panel de código ─────────────────────────────────────────────────────── */
+/* El código y la nota son un solo bloque: la nota cuelga justo debajo del
+   último snippet, no flotando suelta en otra esquina. */
+.pres-stack {
+  position: absolute;
+  right: 3.2vw;
+  top: 50%;
+  width: min(41vw, 720px);
+  transform: translateY(-50%);
+}
+
+.pres-panel {
+  max-height: 62vh;
+  overflow: hidden;
+  transform: translateX(2vw);
+  opacity: 0;
+  /* oculto de verdad: si no, el backdrop-filter sigue costando GPU aunque no
+     se vea, y el ray marcher necesita todos los frames que pueda */
+  visibility: hidden;
+  transition: opacity 0.55s ease, transform 0.55s cubic-bezier(.2,.7,.3,1),
+              visibility 0s linear 0.55s;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1vh;
+}
+
+.pres-panel.show {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition-delay: 0s;
+}
+
+.chunk {
+  background: rgba(6, 7, 10, 0.74);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(16px);
+  overflow: hidden;
+}
+
+.chunk-head {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 14px;
+  font-size: clamp(9px, 0.58vw, 13px);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.34);
+  background: rgba(255, 255, 255, 0.035);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.chunk-head .file { color: rgba(255, 178, 119, 0.72); }
+
+.code {
+  padding: 12px 6px 14px 0;
+  font-size: clamp(11px, 0.76vw, 17px);
+  line-height: 1.62;
+  white-space: pre;
+  overflow: hidden;
+}
+
+/* Cada línea entra con un retardo chiquito según su índice: el bloque se
+   "escribe" en vez de aparecer de golpe. --i lo pone presentacion.js. */
+.ln {
+  display: flex;
+  padding: 0 12px 0 0;
+  border-left: 2px solid transparent;
+  opacity: 0;
+  animation: lnIn 0.42s ease forwards;
+  animation-delay: calc(var(--i) * 22ms + 120ms);
+  transition: opacity 0.4s ease;
+}
+
+@keyframes lnIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* bloque que se repinta en vivo: sin animación de entrada, si no parpadea */
+.chunk.no-anim .ln { animation: none; opacity: 1; }
+.chunk.no-anim .ln.off { opacity: 0.42; }
+
+/* .off = línea de contexto (se atenúa), .on = la línea que estás explicando */
+.ln.off { animation-name: lnInDim; }
+@keyframes lnInDim {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 0.42; transform: none; }
+}
+
+.ln.on {
+  border-left-color: #ff9a4d;
+  background: linear-gradient(90deg, rgba(255, 154, 77, 0.13), rgba(255, 154, 77, 0));
+}
+
+.ln .no {
+  flex: none;
+  width: 3.4em;
+  padding-right: 1.1em;
+  text-align: right;
+  color: rgba(255, 255, 255, 0.18);
+  user-select: none;
+}
+
+/* colores de sintaxis */
+.code .c { color: #6f7a86; font-style: normal; }   /* comentario */
+.code .k { color: #ff8fb0; font-style: normal; }   /* palabra clave */
+.code .t { color: #7fd6ff; font-style: normal; }   /* tipo (vec3, float) */
+.code .f { color: #ffd27f; font-style: normal; }   /* función */
+.code .n { color: #b79cff; font-style: normal; }   /* número */
+.code .s { color: #9fe0a0; font-style: normal; }   /* string */
+.code .u { color: #ffb277; font-style: normal; }   /* uniform (uAlgo) */
+.code .tx { color: rgba(255, 255, 255, 0.9); }
+
+/* ── Nota al margen ──────────────────────────────────────────────────────── */
+/* El dato lindo que no entra en lo que estás diciendo. Aparece después del
+   código, para que el ojo lea primero una cosa y después la otra. */
+.pres-note {
+  position: absolute;
+  top: calc(100% + 1.4vh);
+  left: 0;
+  right: 0;
+  padding: 14px 18px;
+  background: rgba(255, 154, 77, 0.07);
+  border: 1px solid rgba(255, 154, 77, 0.18);
+  border-left: 2px solid #ff9a4d;
+  border-radius: 10px;
+  backdrop-filter: blur(16px);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(8px);
+  transition: opacity 0.6s ease, transform 0.6s cubic-bezier(.2,.7,.3,1),
+              visibility 0s linear 0.6s;
+}
+
+.pres-note.show {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition-delay: 0s;
+}
+
+.pres-note .note-title {
+  font-size: clamp(9px, 0.58vw, 13px);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #ff9a4d;
+  margin-bottom: 5px;
+}
+
+.pres-note .note-text {
+  font: 400 clamp(11px, 0.76vw, 17px)/1.55
+        ui-sans-serif, -apple-system, "Helvetica Neue", sans-serif;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+/* ── Título del beat ─────────────────────────────────────────────────────── */
+.pres-title {
+  position: absolute;
+  left: 4.4vw;
+  bottom: 8vh;
+  max-width: 46vw;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.7s ease, transform 0.7s cubic-bezier(.2,.7,.3,1);
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.8);
+}
+
+.pres-title.show { opacity: 1; transform: none; }
+
+.pres-title .kicker {
+  font-size: clamp(10px, 0.62vw, 14px);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #ff9a4d;
+  margin-bottom: 0.7vh;
+}
+
+.pres-title .head {
+  font: 300 clamp(20px, 1.85vw, 42px)/1.18
+        ui-sans-serif, -apple-system, "Helvetica Neue", sans-serif;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+
+/* ── Barra de progreso ───────────────────────────────────────────────────── */
+/* Casi invisible en el video, pero te dice cuánto te queda. Está abajo de todo
+   para que no moleste. Si te incomoda, borrá este bloque. */
+.pres-bar {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 2px;
+  /* sin fondo: una línea gris cruzando la pantalla se nota más que la barra */
+}
+
+.pres-bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: rgba(255, 154, 77, 0.30);
+}
+
+/* ── Teleprompter (T) ────────────────────────────────────────────────────── */
+/* Solo para ensayar: si lo dejás prendido, sale en la grabación. */
+.pres-say {
+  position: absolute;
+  left: 4vw; right: 46vw; bottom: 22vh;
+  padding: 16px 20px;
+  font: 400 clamp(13px, 1.05vw, 24px)/1.55
+        ui-sans-serif, -apple-system, "Helvetica Neue", sans-serif;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(0, 0, 0, 0.72);
+  border-left: 3px solid #ff9a4d;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.pres.say-on .pres-say { opacity: 1; }
+
+/* ==========================================================================
+   VERTICAL (9:16) · TikTok, Reels, Shorts
+
+   Las medidas van en cqw/cqh (unidades del CONTENEDOR, no de la ventana).
+   Gracias a eso el mismo CSS sirve para los dos casos:
+
+     · ventana vertical de verdad  → el contenedor es toda la ventana
+     · previsualización (tecla V)  → el contenedor es una franja 9:16 centrada
+
+   y el encuadre que ves en la previsualización es exactamente el que vas a
+   grabar: el fov de three.js es el VERTICAL, y la franja tiene la misma
+   altura que la ventana, así que el campo de visión no cambia.
+   ========================================================================== */
+
+.pres.vertical {
+  container-type: size;
+}
+
+/* Previsualización: recortamos a 9:16 y tapamos los costados con negro.
+   El box-shadow gigante es la forma más corta de pintar "todo lo de afuera". */
+.pres.vertical.preview {
+  left: 50%;
+  right: auto;
+  width: calc(100vh * 9 / 16);
+  transform: translateX(-50%);
+  box-shadow: 0 0 0 100vw #000;
+  clip-path: inset(0 -100vw);
+}
+
+/* ==========================================================================
+   (medidas)
+   Todo se reordena: el agujero negro arriba, el texto grande arriba de todo,
+   y el código abajo, ancho. Los tamaños van en vh/vw de la ventana angosta,
+   así que quedan MUCHO más grandes en proporción: en un teléfono el código
+   se tiene que poder leer sin achinar los ojos.
+   ========================================================================== */
+
+/* Anclado a 30vh del piso: el código crece hacia arriba y la nota cuelga
+   abajo, y todo queda lejos de donde TikTok pone sus botones. */
+.pres.vertical .pres-stack {
+  right: auto;
+  left: 4cqw;
+  width: 92cqw;
+  top: auto;
+  bottom: 30cqh;
+  transform: none;
+}
+
+.pres.vertical .pres-panel {
+  max-height: 26cqh;
+  transform: translateY(2cqh);
+  gap: 1.2cqh;
+}
+
+.pres.vertical .pres-panel.show { transform: none; }
+
+.pres.vertical .chunk-head { font-size: clamp(9px, 2.1cqw, 15px); }
+
+.pres.vertical .code {
+  /* en 9:16 el ancho manda: con esto entran 48 caracteres sin cortarse */
+  font-size: clamp(10px, 2.35cqw, 18px);
+  line-height: 1.7;
+}
+
+.pres.vertical .ln .no { width: 2.6em; padding-right: 0.8em; }
+
+/* El título es el subtítulo del short: arriba, grande, y se queda todo el
+   bloque. Es lo que engancha a alguien que llegó de scrollear. */
+.pres.vertical .pres-title {
+  left: 5cqw;
+  right: 5cqw;
+  top: 7cqh;
+  bottom: auto;
+  max-width: none;
+}
+
+.pres.vertical .pres-title .kicker {
+  font-size: clamp(9px, 2.1cqw, 15px);
+  letter-spacing: 0.2em;
+  margin-bottom: 1cqh;
+}
+
+.pres.vertical .pres-title .head {
+  font-size: clamp(20px, 5.6cqw, 42px);
+  font-weight: 500;
+  line-height: 1.15;
+}
+
+.pres.vertical .pres-note { padding: 2cqh 4cqw; }
+
+.pres.vertical .pres-note .note-title { font-size: clamp(9px, 2.1cqw, 14px); }
+
+.pres.vertical .pres-note .note-text {
+  font-size: clamp(12px, 2.9cqw, 21px);
+  line-height: 1.5;
+}
+
+.pres.vertical .pres-say {
+  left: 4cqw; right: 4cqw; bottom: auto; top: 26cqh;
+  font-size: clamp(13px, 3.3cqw, 22px);
+}
+
+/* ── Fundidos y cortes ───────────────────────────────────────────────────── */
+.pres-fade {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+}
+
+/* lista de shorts, en modo vertical */
+.hud-shorts {
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.hud-shorts td { color: rgba(255, 255, 255, 0.45); }
+.hud-shorts td span { color: rgba(255, 255, 255, 0.22); }
+.hud-shorts tr.sel td { color: #ffb277; }
+
+.hud kbd {
+  display: inline-block;
+  min-width: 14px;
+  padding: 1px 6px;
+  font: inherit;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+}
